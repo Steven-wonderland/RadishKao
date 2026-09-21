@@ -24,6 +24,9 @@ cd C:\source\radishkao\CatPet && dotnet run -c Release
 cd C:\source\radishkao\CatPet && dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true
 ```
 
+要發布並同步到 GitHub，執行專案根目錄的 `publish-and-push.cmd`。它會把完整可執行版本放到
+`release\CatPet-win-x64\`，並透過 Git LFS 推送大型 `CatPet.exe`。發布資料夾請整個提供給使用者，不能只拿 exe，因為還需要 `Assets\`、`config.json` 與 WPF 原生檔案。
+
 **開機自動啟動**：按 `Win+R` 輸入 `shell:startup`，把 `CatPet.exe` 的捷徑丟進去就好。
 
 ## 怎麼玩
