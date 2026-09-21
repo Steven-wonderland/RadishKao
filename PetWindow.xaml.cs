@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
@@ -48,6 +49,7 @@ public partial class PetWindow : Window
 
     private readonly string _baseDirectory = AppContext.BaseDirectory;
     private readonly string _configPath;
+    private readonly string _behaviorRatiosPath;
     private readonly ActionRunner _actions = new();
     private readonly DispatcherTimer _bubbleTimer = new();
     private readonly DispatcherTimer _clickTimer = new();
@@ -125,7 +127,9 @@ public partial class PetWindow : Window
         InitializeComponent();
 
         _configPath = Path.Combine(_baseDirectory, "config.json");
+        _behaviorRatiosPath = Path.Combine(_baseDirectory, "behavior-ratios.json");
         _config = PetConfig.Load(_configPath, out _configError);
+        LoadBehaviorRatios(_config);
         LoadSheets();
         _brain = new PetBrain(_config);
         _animator = new Animator(ClipLibrary.Get("idle"));
@@ -1147,6 +1151,7 @@ public partial class PetWindow : Window
                 && e.CloseReason == System.Windows.Forms.ToolStripDropDownCloseReason.ItemClicked)
             {
                 e.Cancel = true;
+                return;
             }
 
             _keepMenuOpen = false;
@@ -1228,10 +1233,12 @@ public partial class PetWindow : Window
     private System.Windows.Forms.ToolStripMenuItem BuildBehaviorMenu()
     {
         var root = new System.Windows.Forms.ToolStripMenuItem("動作比例");
+        root.DropDown.Closing += KeepBehaviorMenuOpen;
 
         foreach (var habit in PetBrain.Catalog)
         {
             var group = new System.Windows.Forms.ToolStripMenuItem(habit.Label);
+            group.DropDown.Closing += KeepBehaviorMenuOpen;
             var chosen = NearestFactor(habit);
 
             foreach (var (label, factor) in BehaviorLevels)
@@ -1278,6 +1285,17 @@ public partial class PetWindow : Window
         return root;
     }
 
+    private void KeepBehaviorMenuOpen(
+        object? sender,
+        System.Windows.Forms.ToolStripDropDownClosingEventArgs e)
+    {
+        if (_keepMenuOpen
+            && e.CloseReason == System.Windows.Forms.ToolStripDropDownCloseReason.ItemClicked)
+        {
+            e.Cancel = true;
+        }
+    }
+
     private double CurrentWeight(PetBrain.Habit habit) =>
         _config.Behaviors.TryGetValue(habit.Key, out var weight) ? Math.Max(0, weight) : habit.Default;
 
@@ -1306,6 +1324,8 @@ public partial class PetWindow : Window
     /// </summary>
     private void SaveBehaviorsToConfig()
     {
+        SaveBehaviorRatios();
+
         try
         {
             if (!File.Exists(_configPath))
@@ -1339,6 +1359,56 @@ public partial class PetWindow : Window
         catch (Exception ex)
         {
             ShowBubble($"比例存不回去: {ex.Message}");
+        }
+    }
+
+    private void LoadBehaviorRatios(PetConfig config)
+    {
+        try
+        {
+            if (!File.Exists(_behaviorRatiosPath))
+            {
+                return;
+            }
+
+            var json = File.ReadAllText(_behaviorRatiosPath);
+            var ratios = JsonSerializer.Deserialize<Dictionary<string, double>>(json);
+
+            if (ratios is null)
+            {
+                return;
+            }
+
+            foreach (var (key, weight) in ratios)
+            {
+                config.Behaviors[key] = Math.Max(0, weight);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowBubble($"比例紀錄讀不動: {ex.Message}");
+        }
+    }
+
+    private void SaveBehaviorRatios()
+    {
+        try
+        {
+            var ratios = PetBrain.Catalog.ToDictionary(
+                habit => habit.Key,
+                CurrentWeight,
+                StringComparer.OrdinalIgnoreCase);
+
+            var json = JsonSerializer.Serialize(ratios, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+            });
+
+            File.WriteAllText(_behaviorRatiosPath, json);
+        }
+        catch (Exception ex)
+        {
+            ShowBubble($"比例紀錄存不回去: {ex.Message}");
         }
     }
 
@@ -1537,6 +1607,7 @@ public partial class PetWindow : Window
         }
 
         var previous = _config;
+        LoadBehaviorRatios(next);
         _config = next;
 
         try

@@ -60,6 +60,8 @@ cd C:\source\radishkao\CatPet && dotnet publish -c Release -r win-x64 --self-con
 | `depthEffect` / `minDepth` | 追誘餌時往上跑縮小、跑回來放大；`minDepth` 是畫面最上緣的縮放倍率 |
 | `behaviors` | 各待機動作被抽中的相對機率，右鍵選單「動作比例」會改寫這段 |
 
+右鍵調整過的動作比例也會另存到執行檔旁的 `behavior-ratios.json`。這個檔案會在下次啟動時自動讀回，請和 `CatPet.exe` 放在同一個資料夾。
+
 ### 互動
 
 `triggers` 下面有五個觸發點：`leftClick`、`doubleClick`、`middleClick`、`pickUp`、`drop`。
@@ -132,7 +134,7 @@ cd C:\source\radishkao\CatPet && dotnet publish -c Release -r win-x64 --self-con
 | 煩人Mode | 找出「開始」按鈕、走過去、說「理我！」、撥它一下，爪子碰到的那一格彈出開始選單 |
 | 放毛線球（Ctrl+F10） | 同快捷鍵：滑鼠變成毛線球，點一下放下 |
 | 放罐罐（Ctrl+F11） | 同快捷鍵 |
-| **動作比例** ▸ | 子選單，七個待機動作各自可選 **關閉 / 少一點 / 普通 / 多一點**。目前值會打勾，選完選單不會關掉，可以連續調好幾個 |
+| **動作比例** ▸ | 子選單，八個待機動作各自可選 **關閉 / 少一點 / 普通 / 多一點**。目前值會打勾，選完選單不會關掉，可以連續調好幾個 |
 | 目前大小 45% | 只是顯示，不能點 |
 | **放大 5%** | 每按一次放大一級（×1.05），選單留著讓你連按 |
 | **縮小 5%** | 每按一次縮小一級（÷1.05） |
