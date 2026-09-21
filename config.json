@@ -1,0 +1,125 @@
+{
+  // 貓咪外觀 ------------------------------------------------------------
+  "spriteSheet": "Assets/cat-spritesheet.png",
+  "scale": 0.52,          // 1.0 = 原圖 192x208，0.52 約 100x108
+  "walkSpeed": 48,        // 散步速度 (每秒像素)
+  "runSpeed": 130,        // 衝刺速度 (每秒像素)
+  "footOffset": 0,        // 正數 = 往工作列裡面踩深一點，負數 = 往上浮
+  "bubbleSeconds": 2.5,   // 對話泡泡停留秒數
+  "draggable": true,      // 可以用滑鼠把貓抓起來丟
+  "greeting": "",         // 啟動時打招呼的台詞；空字串 = 安靜登場
+
+  // 追誘餌時的遠近感：往上跑會縮小、跑回工作列會放大。
+  // 只看離工作列多高，所以純左右跑不會被縮放。
+  "depthEffect": true,
+  "minDepth": 0.55,       // 跑到畫面最上緣時縮到原本的幾成
+
+  // 撥開始鈕（右鍵選單「去撥開始鈕」）
+  "startSwatAnimation": "swat",  // 撥的動畫
+  "startSwatDelayMs": 0,         // 0 = 自動對準爪子碰到的那一格；要自己指定就填毫秒
+  "startSwatUsesWinKey": false,  // false = 用 WM_SYSCOMMAND 請 shell 開（不碰鍵盤，較安全）
+                                 // true  = 真的合成一次 Windows 鍵
+
+  // 各種待機動作被抽中的相對機率。右鍵選單的「動作比例」會改寫這一段。
+  // 刪掉整段就回到程式內建值。
+  "behaviors": { "stand": 16, "stroll": 26, "dash": 9, "sit": 13, "look": 10, "nap": 6, "doze": 14, "annoying": 3 },
+
+  // 誘餌 ----------------------------------------------------------------
+  //
+  // 按下 hotkey，滑鼠會變成那個東西；點一下就放在該處，貓會衝過去，
+  // 玩/吃一下再跑回工作列。Esc 或右鍵可以取消。
+  //
+  //   "hotkey"          全域快捷鍵，例如 "Ctrl+F10"
+  //   "image"           游標和放在畫面上的圖
+  //   "displaySize"     放在畫面上的高度 (dip)
+  //   "anchorX/Y"       貓到達時，格子裡的哪一點要對準那個東西
+  //                     （192x208 的格子座標；腳掌線是 y=202）
+  //   "arriveAnimation" 到了之後播哪個動畫
+  //   "arriveSeconds"   待多久
+  //   "hideOnArrive"    動畫本身已經畫了那個東西時設 true（毛球就是）
+  //   "speedMultiplier" 衝過去時是 runSpeed 的幾倍
+  //
+  "lures": [
+    {
+      "name": "毛線球",
+      "hotkey": "Ctrl+F10",
+      "image": "Assets/yarn-ball.png",
+      "displaySize": 26,
+      "anchorX": 104,
+      "anchorY": 177,
+      "arriveAnimation": "play",
+      "arriveSeconds": 4,
+      "hideOnArrive": true,
+      "speedMultiplier": 1.7,
+      "say": "球球！",
+      "arriveSay": "喵嗚～",
+      "hint": "點一下把毛線球放在那裡 · Esc 或右鍵取消"
+    },
+    {
+      "name": "罐罐",
+      "hotkey": "Ctrl+F11",
+      "image": "Assets/can.png",
+      "displaySize": 24,
+      "anchorX": 140,
+      "anchorY": 152,
+      "arriveAnimation": "sit",
+      "arriveSeconds": 5,
+      "hideOnArrive": false,
+      "speedMultiplier": 2.0,
+      "say": "罐罐！！",
+      "arriveSay": "呼嚕呼嚕...",
+      "hint": "點一下把罐罐放在那裡 · Esc 或右鍵取消"
+    }
+  ],
+
+  // 互動設定 ------------------------------------------------------------
+  //
+  // 每個觸發點可以放好幾個動作，程式會依 weight 隨機挑一個。
+  // 一個動作裡的欄位全部都是選填的：
+  //
+  //   "animation"        要播哪個動畫。可用名稱：
+  //                      idle / walk_left / walk_right / run_left / run_right /
+  //                      held / sleep_in / sleep_deep / sleep_out /
+  //                      sit / look_left / look_right
+  //                      （play 自帶毛球，留給下面的 lures 用）
+  //   "say"              對話泡泡要講的話
+  //   "run"              要開的程式、檔案或網址（ShellExecute 吃什麼都行）
+  //   "args"             傳給 run 的命令列參數
+  //   "workingDirectory" run 的工作目錄
+  //   "weight"           被抽中的相對機率，預設 1
+  //
+  // 觸發點名稱：leftClick / doubleClick / middleClick / pickUp / drop
+  //
+  "triggers": {
+    "leftClick": [
+      // "play" 不放這裡：毛球只有在 Ctrl+F10 真的丟一顆下去時才會出現。
+      { "animation": "look_right", "say": "喵～", "weight": 3 },
+      { "animation": "look_left", "say": "幹嘛？", "weight": 2 },
+      { "animation": "sit", "say": "嗯？", "weight": 1 }
+    ],
+
+    "doubleClick": [
+      { "animation": "look_right", "say": "連點兩下想叫我做什麼？" }
+
+      // 想讓連點兩下真的做事，就把上面那行換成這種：
+      //
+      //   { "animation": "look_right", "say": "開工！", "run": "notepad.exe" }
+      //   { "animation": "look_right", "say": "查一下", "run": "https://www.google.com" }
+      //   { "animation": "sit", "say": "打開報表", "run": "C:\\work\\daily.xlsx" }
+      //   { "animation": "sit", "run": "powershell.exe",
+      //     "args": "-NoProfile -Command Get-Date", "workingDirectory": "C:\\" }
+    ],
+
+    "middleClick": [
+      { "animation": "sleep_in", "say": "想睡..." }
+    ],
+
+    "pickUp": [
+      { "say": "喵嗚？" }
+    ],
+
+    "drop": [
+      { "say": "放我下來..." }
+    ]
+  }
+}
