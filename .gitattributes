@@ -1,0 +1,1 @@
+release/CatPet-win-x64/CatPet.exe filter=lfs diff=lfs merge=lfs -text
