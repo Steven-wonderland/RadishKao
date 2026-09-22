@@ -9,6 +9,14 @@
   "draggable": true,      // 可以用滑鼠把貓抓起來丟
   "greeting": "",         // 啟動時打招呼的台詞；空字串 = 安靜登場
 
+  // 要不要聽外面來的通知。true = 別的程式可以叫貓做反應（見下面 triggers
+  // 的說明），false = 完全不理外面。右鍵選單的「接收通知」會改寫這一行。
+  "notifications": true,
+
+  // 睡著時收到通知，要不要先伸懶腰起身再講話。
+  // false = 直接在趴著的狀態冒泡泡（快一點，但畫面上怪）。
+  "notifyWakeFirst": true,
+
   // 追誘餌時的遠近感：往上跑會縮小、跑回工作列會放大。
   // 只看離工作列多高，所以純左右跑不會被縮放。
   "depthEffect": true,
@@ -38,6 +46,9 @@
   //   "arriveSeconds"   待多久
   //   "hideOnArrive"    動畫本身已經畫了那個東西時設 true（毛球就是）
   //   "speedMultiplier" 衝過去時是 runSpeed 的幾倍
+  //   "say"             放下東西時說的話
+  //   "arriveSay"       跑到時說的話
+  //   "finishSay"       arriveSeconds 到了、要跑回工作列時說的話（吃完的那一刻）
   //
   "lures": [
     {
@@ -68,6 +79,7 @@
       "speedMultiplier": 2.0,
       "say": "罐罐！！",
       "arriveSay": "呼嚕呼嚕...",
+      "finishSay": "♥♥♥",
       "hint": "點一下把罐罐放在那裡 · Esc 或右鍵取消"
     }
   ],
@@ -83,12 +95,23 @@
   //                      sit / look_left / look_right
   //                      （play 自帶毛球，留給下面的 lures 用）
   //   "say"              對話泡泡要講的話
+  //   "icon"             泡泡左邊那個小圖（16x16 顯示），例如通知來源的 logo。
+  //                      路徑可以放一個 * 當萬用字元，會挑最新的那個 ——
+  //                      裝在帶版號資料夾裡的程式更新後才不會失效。
   //   "run"              要開的程式、檔案或網址（ShellExecute 吃什麼都行）
   //   "args"             傳給 run 的命令列參數
   //   "workingDirectory" run 的工作目錄
   //   "weight"           被抽中的相對機率，預設 1
   //
-  // 觸發點名稱：leftClick / doubleClick / middleClick / pickUp / drop
+  // 內建觸發點：leftClick / doubleClick / middleClick / pickUp / drop
+  //
+  // 除此之外，"notifications" 打開時任何名字都可以從外面觸發：
+  //
+  //   catpet-notify.cmd <名字> [要說的話]
+  //
+  // 它會往 %LOCALAPPDATA%\CatPet\inbox 丟一個檔案，貓看到就反應。
+  // 檔名第一個點之前是觸發點名字，檔案內容（有的話）會蓋掉這裡的 "say"。
+  // 下面 claudeNotification / claudeDone 就是給 Claude Code 的 hook 用的。
   //
   "triggers": {
     "leftClick": [
@@ -120,6 +143,54 @@
 
     "drop": [
       { "say": "放我下來..." }
+    ],
+
+    // Claude Code 在等你回應（授權、選項、問題）時。
+    //
+    // icon 用的是 %LOCALAPPDATA%\CatPet\icons\claude.png —— 從 Claude 安裝
+    // 目錄複製出來的一份。不直接指到安裝目錄，是因為 WindowsApps 的 ACL
+    // 不給列出根目錄，萬用字元在那裡展不開。換成任何一張 PNG 都可以。
+    //
+    // bubbleSeconds 蓋掉上面的全域值：泡泡留 10 秒，這 10 秒內點貓就會把
+    // Claude 叫到前面來（onClick）。泡泡淡掉之後點牠就只是普通的點擊。
+    //
+    // onClick 的 run 用 Claude 自己註冊的 claude:// 深層連結，效果等同於去點
+    // Windows 那則通知 —— 不只是把 app 叫到前面，而是直接跳到在等你的那個
+    // session。可用的路由（都是 app 自己的 deep-link handler 認的）：
+    //
+    //   claude://code/needs-input              等你回應最久的那個 session
+    //   claude://code/needs-input?session=<id> 指定 session
+    //   claude://code/continue?session=last    接續上一個 session
+    //   claude://code/new                      開新的 session
+    //
+    // 換成 shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude 也能開，但那只會把
+    // 視窗帶到前面，不會幫你跳到對的對話。
+    "claudeNotification": [
+      { "animation": "look_right", "say": "Claude 在等你！", "weight": 2,
+        "icon": "%LOCALAPPDATA%\\CatPet\\icons\\claude.png",
+        "bubbleSeconds": 10,
+        "onClick": { "animation": "look_left", "say": "來了喵",
+                     "run": "claude://code/needs-input" } },
+      { "animation": "look_left", "say": "喵？有人叫你", "weight": 1,
+        "icon": "%LOCALAPPDATA%\\CatPet\\icons\\claude.png",
+        "bubbleSeconds": 10,
+        "onClick": { "animation": "look_right", "say": "帶你去",
+                     "run": "claude://code/needs-input" } }
+    ],
+
+    // Claude Code 做完一輪、把話語權交回給你時。
+    // 這時沒有「在等輸入」的狀態，所以用 continue 接回剛才那個 session。
+    "claudeDone": [
+      { "animation": "look_left", "say": "做完了喵", "weight": 2,
+        "icon": "%LOCALAPPDATA%\\CatPet\\icons\\claude.png",
+        "bubbleSeconds": 10,
+        "onClick": { "animation": "look_right", "say": "去看看",
+                     "run": "claude://code/continue?session=last" } },
+      { "animation": "look_right", "say": "換你了", "weight": 1,
+        "icon": "%LOCALAPPDATA%\\CatPet\\icons\\claude.png",
+        "bubbleSeconds": 10,
+        "onClick": { "animation": "look_left", "say": "來了喵",
+                     "run": "claude://code/continue?session=last" } }
     ]
   }
 }

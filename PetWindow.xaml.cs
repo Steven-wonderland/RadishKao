@@ -119,8 +119,29 @@ public partial class PetWindow : Window
     private System.Windows.Forms.ContextMenuStrip? _menu;
     private System.Windows.Forms.ToolStripMenuItem? _pauseItem;
     private System.Windows.Forms.ToolStripMenuItem? _sizeLabel;
+    private System.Windows.Forms.ToolStripMenuItem? _notifyItem;
     private bool _keepMenuOpen;
     private IntPtr _iconHandle;
+
+    /// <summary>Watches the inbox folder while notifications are switched on.</summary>
+    private NotifyInbox? _inbox;
+
+    /// <summary>Holds a notification back until the cat has finished waking up.</summary>
+    private readonly DispatcherTimer _notifyDelayTimer = new();
+    private TriggerAction? _pendingNotify;
+
+    /// <summary>
+    /// What a click does while the current bubble is up, if that bubble came
+    /// from an action with an <c>onClick</c>. Cleared by every new bubble and
+    /// when the bubble fades.
+    /// </summary>
+    private TriggerAction? _armedClick;
+
+    /// <summary>
+    /// Bubble icons by the path written in config.json, so a notification that
+    /// arrives every few minutes decodes its logo once.
+    /// </summary>
+    private readonly Dictionary<string, BitmapImage?> _bubbleIcons = new(StringComparer.OrdinalIgnoreCase);
 
     public PetWindow()
     {
@@ -142,6 +163,7 @@ public partial class PetWindow : Window
 
         _bubbleTimer.Tick += OnBubbleTimeout;
         _clickTimer.Tick += OnClickTimeout;
+        _notifyDelayTimer.Tick += OnNotifyDelayElapsed;
 
         Sprite.RenderTransform = _renderScale;
 
@@ -235,6 +257,7 @@ public partial class PetWindow : Window
     private void OnLoaded(object? sender, RoutedEventArgs e)
     {
         SetupTray();
+        ApplyNotifications();
         NextStep();
         CompositionTarget.Rendering += OnRendering;
 
@@ -448,6 +471,16 @@ public partial class PetWindow : Window
         if (_step.Clip == PetBrain.AnnoyingModeStep)
         {
             _step = null;
+
+            // Annoying mode walks the cat off and says its own line, which
+            // would replace a notification bubble that is still waiting to be
+            // clicked. Skip this turn rather than talk over the offer.
+            if (_armedClick is not null)
+            {
+                NextStep();
+                return;
+            }
+
             AnnoyingMode();
             return;
         }
@@ -669,6 +702,12 @@ public partial class PetWindow : Window
                 }
 
                 chase.Prop.Hide();
+
+                if (!string.IsNullOrWhiteSpace(lure.FinishSay))
+                {
+                    ShowBubble(lure.FinishSay!);
+                }
+
                 chase.Phase = ChasePhase.Home;
                 chase.TargetX = Math.Clamp(_x, _ground.Left, _ground.Right);
                 chase.TargetY = _ground.FloorY;
@@ -792,6 +831,35 @@ public partial class PetWindow : Window
         // lifts the cat off the taskbar.
         Sprite.RenderTransformOrigin =
             new System.Windows.Point(0.5, clip.Baseline / MainSheet.CellHeight);
+
+        KeepBubbleClearOfArt(clip);
+    }
+
+    /// <summary>
+    /// Slides the bubble up when the current clip is scaled past 1. Scaling
+    /// happens about the paw point, so a clip with Zoom &gt; 1 grows upwards and
+    /// its head reaches into the strip the bubble sits in -- being held is the
+    /// obvious case, where the art needs a big correction and the cat ends up
+    /// over its own speech. The lift is capped at the slack left in the strip,
+    /// because anything above the window's top edge would simply be clipped.
+    /// </summary>
+    private void KeepBubbleClearOfArt(Clip clip)
+    {
+        // Distance from the top of the sprite row down to the paw line, which
+        // is what the extra scale multiplies.
+        var toPaw = clip.Baseline * _scale;
+        var overflow = Math.Max(0, toPaw * (_renderScaleValue - 1));
+
+        // ActualHeight is 0 until the bubble has been laid out once.
+        var bubbleHeight = Bubble.ActualHeight > 0 ? Bubble.ActualHeight : 26;
+        var slack = Math.Max(0, BubbleHeightDip - bubbleHeight - 3);
+
+        var lift = Math.Min(overflow, slack);
+
+        if (Math.Abs(BubbleLift.Y + lift) > 0.5)
+        {
+            BubbleLift.Y = -lift;
+        }
     }
 
     private void Reposition(bool forceTopmost)
@@ -1017,8 +1085,18 @@ public partial class PetWindow : Window
 
     // ------------------------------------------------------------- reactions
 
-    private void Trigger(string name)
+    private void Trigger(string name, string? sayOverride = null, bool fromOutside = false)
     {
+        // A notification bubble that is waiting to be clicked takes the click,
+        // whatever the cat happens to be doing.
+        if (name is "leftClick" or "doubleClick" && _armedClick is not null)
+        {
+            var armed = _armedClick;
+            _armedClick = null;
+            Perform(armed);
+            return;
+        }
+
         // Poking a sleeping cat gets you a stretch and a yawn, not the usual
         // click reaction.
         if (name is "leftClick" or "doubleClick"
@@ -1034,11 +1112,162 @@ public partial class PetWindow : Window
         }
 
         var action = _actions.Pick(_config.ActionsFor(name));
+        if (action is null)
+        {
+            // A sender can name a trigger that config.json says nothing about.
+            // If it handed us a line anyway, saying it beats staying silent.
+            if (sayOverride is not null)
+            {
+                ShowBubble(sayOverride);
+            }
+
+            return;
+        }
+
+        if (sayOverride is not null)
+        {
+            // Don't scribble on the config object; the same action instance is
+            // reused every time this trigger fires.
+            action = new TriggerAction
+            {
+                Animation = action.Animation,
+                Say = sayOverride,
+                Icon = action.Icon,
+                Run = action.Run,
+                Args = action.Args,
+                WorkingDirectory = action.WorkingDirectory,
+                UseShellExecute = action.UseShellExecute,
+                Weight = action.Weight,
+                BubbleSeconds = action.BubbleSeconds,
+                OnClick = action.OnClick,
+            };
+        }
+
+        // A notification that lands on a sleeping cat waits for it to get up,
+        // so the bubble is not delivered by a cat still lying down.
+        if (fromOutside && _config.NotifyWakeFirst && TryWakeFor(action))
+        {
+            return;
+        }
+
+        Perform(action);
+    }
+
+    /// <summary>
+    /// If the cat is asleep, starts it waking and parks the action until the
+    /// getting-up animation has played out. Returns false when the cat is
+    /// already up, so the caller performs the action itself.
+    /// </summary>
+    private bool TryWakeFor(TriggerAction action)
+    {
+        // Already waking for an earlier notification: just swap in the newer
+        // one rather than restarting the stretch.
+        if (_notifyDelayTimer.IsEnabled)
+        {
+            _pendingNotify = action;
+            return true;
+        }
+
+        // The lying-down and the sitting nap have different ways up: a full
+        // stretch and a yawn, or simply sitting back upright.
+        var wake = _animator.Current.Name switch
+        {
+            "doze" or "lie_down" => "wake_stretch",
+            "sleep_in" or "sleep_deep" => "sleep_out",
+            _ => null,
+        };
+
+        // A retired clip (its sheet never loaded) resolves to idle, and waiting
+        // out an idle would just delay the notification for nothing.
+        if (wake is null || Resolve(wake).Name != wake)
+        {
+            return false;
+        }
+
+        var clip = Resolve(wake);
+
+        _steps.Clear();
+        _step = null;
+        _steps.Enqueue(new BehaviorStep(clip.Name, 0));
+        NextStep();
+
+        _pendingNotify = action;
+        _notifyDelayTimer.Interval = TimeSpan.FromMilliseconds(clip.StepCount * clip.FrameMs);
+        _notifyDelayTimer.Start();
+
+        return true;
+    }
+
+    private void OnNotifyDelayElapsed(object? sender, EventArgs e)
+    {
+        _notifyDelayTimer.Stop();
+
+        var action = _pendingNotify;
+        _pendingNotify = null;
+
         if (action is not null)
         {
             Perform(action);
         }
     }
+
+    // ------------------------------------------------------- outside triggers
+
+    /// <summary>
+    /// Starts or stops the inbox watcher to match config.json. Safe to call
+    /// repeatedly: a reload and the menu toggle both go through here.
+    /// </summary>
+    private void ApplyNotifications()
+    {
+        if (_notifyItem is not null && _notifyItem.Checked != _config.Notifications)
+        {
+            // Assigning Checked raises CheckedChanged, which lands back here.
+            // The guard above makes that second pass a no-op.
+            _notifyItem.Checked = _config.Notifications;
+        }
+
+        if (!_config.Notifications)
+        {
+            _inbox?.Dispose();
+            _inbox = null;
+            return;
+        }
+
+        if (_inbox is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            var inbox = new NotifyInbox();
+            inbox.Received += OnInboxReceived;
+            _inbox = inbox;
+        }
+        catch (Exception ex)
+        {
+            _config.Notifications = false;
+
+            if (_notifyItem is not null)
+            {
+                _notifyItem.Checked = false;
+            }
+
+            ShowBubble($"收不到通知: {ex.Message}");
+        }
+    }
+
+    /// <summary>Arrives on a watcher thread, so everything is handed to the UI.</summary>
+    private void OnInboxReceived(string trigger, string? text) =>
+        Dispatcher.BeginInvoke(() =>
+        {
+            // The watcher is torn down asynchronously, so a drop can still land
+            // just after the switch was turned off.
+            if (_config.Notifications)
+            {
+                Trigger(trigger, text, fromOutside: true);
+            }
+        });
 
     /// <summary>Plays the reaction, says the line, and launches whatever is configured.</summary>
     private void Perform(TriggerAction action)
@@ -1058,8 +1287,11 @@ public partial class PetWindow : Window
 
         if (!string.IsNullOrWhiteSpace(action.Say))
         {
-            ShowBubble(action.Say!);
+            ShowBubble(action.Say!, action.Icon, action.BubbleSeconds);
         }
+
+        // After the bubble, because showing one is what disarms the last click.
+        _armedClick = action.OnClick;
 
         var error = _actions.Launch(action);
         if (error is not null)
@@ -1068,20 +1300,123 @@ public partial class PetWindow : Window
         }
     }
 
-    private void ShowBubble(string text)
+    private void ShowBubble(string text, string? iconPath = null, double? seconds = null)
     {
+        // A new bubble replaces whatever the last one offered on a click.
+        _armedClick = null;
+
+        var icon = ResolveBubbleIcon(iconPath);
+        BubbleIcon.Source = icon;
+        BubbleIcon.Visibility = icon is null ? Visibility.Collapsed : Visibility.Visible;
+
         BubbleText.Text = text;
         Bubble.BeginAnimation(OpacityProperty, null);
         Bubble.Opacity = 1;
 
         _bubbleTimer.Stop();
-        _bubbleTimer.Interval = TimeSpan.FromSeconds(Math.Max(0.6, _config.BubbleSeconds));
+        _bubbleTimer.Interval = TimeSpan.FromSeconds(Math.Max(0.6, seconds ?? _config.BubbleSeconds));
         _bubbleTimer.Start();
+    }
+
+    /// <summary>
+    /// Turns the icon path from config.json into a bitmap, or null for no icon.
+    /// A path may hold one * wildcard, which matters for apps that install into
+    /// a versioned folder: the newest match is used, so the icon survives that
+    /// app updating itself. Failures are cached as null and stay silent — a
+    /// missing logo should not cost you the notification's text.
+    /// </summary>
+    private BitmapImage? ResolveBubbleIcon(string? iconPath)
+    {
+        if (string.IsNullOrWhiteSpace(iconPath))
+        {
+            return null;
+        }
+
+        if (_bubbleIcons.TryGetValue(iconPath, out var cached))
+        {
+            return cached;
+        }
+
+        BitmapImage? image = null;
+
+        try
+        {
+            var expanded = Environment.ExpandEnvironmentVariables(iconPath);
+
+            if (!Path.IsPathRooted(expanded))
+            {
+                expanded = Path.Combine(_baseDirectory, expanded);
+            }
+
+            var file = expanded.Contains('*') ? NewestMatch(expanded) : expanded;
+
+            if (file is not null && File.Exists(file))
+            {
+                image = new BitmapImage();
+                image.BeginInit();
+                image.UriSource = new Uri(file);
+                // Read it now and let go of the file: the source may live in an
+                // install folder that an updater wants to replace.
+                image.CacheOption = BitmapCacheOption.OnLoad;
+                image.DecodePixelHeight = 32;
+                image.EndInit();
+                image.Freeze();
+            }
+        }
+        catch (Exception)
+        {
+            image = null;
+        }
+
+        _bubbleIcons[iconPath] = image;
+        return image;
+    }
+
+    /// <summary>
+    /// Expands a path whose directory part carries the wildcard, e.g.
+    /// "...\App_*_x64\resources\icon.png". Only one wildcarded segment is
+    /// supported, which is all a versioned install folder needs.
+    /// </summary>
+    private static string? NewestMatch(string pattern)
+    {
+        var segments = pattern.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var wildcard = Array.FindIndex(segments, s => s.Contains('*'));
+
+        if (wildcard < 0)
+        {
+            return File.Exists(pattern) ? pattern : null;
+        }
+
+        var root = string.Join(Path.DirectorySeparatorChar, segments[..wildcard]);
+
+        if (root.Length == 0 || !Directory.Exists(root))
+        {
+            return null;
+        }
+
+        var tail = segments[(wildcard + 1)..];
+
+        // A wildcard in the file name itself has no tail to append.
+        if (tail.Length == 0)
+        {
+            return Directory.EnumerateFiles(root, segments[wildcard])
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+
+        return Directory.EnumerateDirectories(root, segments[wildcard])
+            .OrderByDescending(d => d, StringComparer.OrdinalIgnoreCase)
+            .Select(d => Path.Combine(d, Path.Combine(tail)))
+            .FirstOrDefault(File.Exists);
     }
 
     private void OnBubbleTimeout(object? sender, EventArgs e)
     {
         _bubbleTimer.Stop();
+
+        // The offer goes with the bubble: a click after it fades is just a click.
+        _armedClick = null;
+
         Bubble.BeginAnimation(
             OpacityProperty,
             new DoubleAnimation(0, TimeSpan.FromMilliseconds(320)) { FillBehavior = FillBehavior.HoldEnd });
@@ -1158,6 +1493,27 @@ public partial class PetWindow : Window
         };
 
         _menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+
+        _notifyItem = new System.Windows.Forms.ToolStripMenuItem("接收通知")
+        {
+            CheckOnClick = true,
+            Checked = _config.Notifications,
+        };
+
+        _notifyItem.CheckedChanged += (_, _) =>
+        {
+            if (_notifyItem!.Checked == _config.Notifications)
+            {
+                return;
+            }
+
+            _config.Notifications = _notifyItem.Checked;
+            ApplyNotifications();
+            SaveNotificationsToConfig();
+            ShowBubble(_config.Notifications ? "通知打開了" : "不聽通知了");
+        };
+
+        _menu.Items.Add(_notifyItem);
 
         _pauseItem = new System.Windows.Forms.ToolStripMenuItem("暫停動作") { CheckOnClick = true };
         _pauseItem.CheckedChanged += (_, _) => _paused = _pauseItem!.Checked;
@@ -1490,6 +1846,54 @@ public partial class PetWindow : Window
     }
 
     /// <summary>
+    /// Writes the notification switch back the same way the scale is written:
+    /// patch the one value in place so the comments in config.json survive. The
+    /// key is appended if the file predates it.
+    /// </summary>
+    private void SaveNotificationsToConfig()
+    {
+        try
+        {
+            if (!File.Exists(_configPath))
+            {
+                return;
+            }
+
+            var text = File.ReadAllText(_configPath);
+            var value = _config.Notifications ? "true" : "false";
+
+            var updated = Regex.Replace(
+                text,
+                @"^(\s*""notifications""\s*:\s*)(?:true|false)",
+                "${1}" + value,
+                RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+            if (updated == text)
+            {
+                // No such key yet. Slot it in after the opening brace rather
+                // than re-serialising the whole file over the comments.
+                var brace = text.IndexOf('{');
+
+                if (brace < 0)
+                {
+                    return;
+                }
+
+                updated = text[..(brace + 1)]
+                    + Environment.NewLine
+                    + $"  \"notifications\": {value},"
+                    + text[(brace + 1)..];
+            }
+
+            File.WriteAllText(_configPath, updated);
+        }
+        catch (Exception ex)
+        {
+            ShowBubble($"通知設定存不回去: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Walks over to the Start button and bats at it, popping the Start menu
     /// part-way through the swat so the paw and the menu line up.
     /// </summary>
@@ -1610,6 +2014,10 @@ public partial class PetWindow : Window
         LoadBehaviorRatios(next);
         _config = next;
 
+        // A failed icon is cached as null, so a reload is the moment to give a
+        // corrected path (or a file that has since appeared) another go.
+        _bubbleIcons.Clear();
+
         try
         {
             LoadSheets();
@@ -1627,6 +2035,7 @@ public partial class PetWindow : Window
         EndChase(resume: false);
         RegisterLureHotkeys();
         RebuildTrayMenu();
+        ApplyNotifications();
         _steps.Clear();
         _step = null;
         NextStep();
@@ -1653,6 +2062,11 @@ public partial class PetWindow : Window
         CompositionTarget.Rendering -= OnRendering;
         _bubbleTimer.Stop();
         _clickTimer.Stop();
+        _notifyDelayTimer.Stop();
+        _pendingNotify = null;
+
+        _inbox?.Dispose();
+        _inbox = null;
 
         _picker?.CancelFromOutside();
         EndChase(resume: false);

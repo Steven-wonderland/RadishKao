@@ -59,7 +59,7 @@ public static class ClipLibrary
         new("sleep_deep", Row: 5,  Start: 3, Count: 2, FrameMs: 700, Loop: true, PingPong: true, Zoom: SleepZoom),
         new("sleep_out",  Row: 5,  Start: 5, Count: 3, FrameMs: 260, Loop: false, Zoom: SleepZoom),
         new("play",       Row: 6,  Start: 0, Count: 6, FrameMs: 130, Loop: true),
-        new("sit",        Row: 7,  Start: 0, Count: 6, FrameMs: 260, Loop: true),
+        new("sit",        Row: 7,  Start: 0, Count: 6, FrameMs: 260, Loop: true, Zoom: SitZoom),
         new("look_right", Row: 9,  Start: 0, Count: 8, FrameMs: 170, Loop: false),
         new("look_left",  Row: 10, Start: 0, Count: 8, FrameMs: 170, Loop: false),
 
@@ -97,17 +97,31 @@ public static class ClipLibrary
     ];
 
     /// <summary>
-    /// Size corrections for the later strips, which are drawn a touch smaller
-    /// than the original sheet. Nudge these if a pose still looks off; they are
-    /// render-only and do not move the paw line.
+    /// Size corrections for the rows and strips whose art is drawn to a
+    /// different scale than the standing pose. Nudge these if a pose still
+    /// looks off; they are render-only and do not move the paw line.
     /// </summary>
     // Only the stretch needs help: lying flat is already drawn wide, so it
     // stays at 1.0 and the boost lands as the cat unfolds out of it.
     private const double StretchZoom = 1.06;
 
-    private const double SleepZoom = 0.88;
+    // Row 5 is drawn to the same scale as the rest of the main sheet: its first
+    // frame measures 137x194 with the paws on y=200, same as the standing rows.
+    // It only looks smaller as the cat crouches, which is the animation. So no
+    // correction -- an earlier 0.88 here shrank the whole sleep sequence by 12%.
+    private const double SleepZoom = 1.0;
 
-    private const double HeldZoom = 1.05;
+    // Row 7 is the one row drawn oversized: its head measures about 121px
+    // against 104px standing (and 106px on row 6, which is the same sitting
+    // pose at the right scale), so the cat visibly swells whenever it sits
+    // idle. Scaling down by the head ratio puts it back on the same scale.
+    private const double SitZoom = 0.86;
+
+    // The held art is genuinely smaller: the hand is drawn above the cat, so
+    // squeezing hand and cat together into one 192x208 cell leaves the cat at
+    // about three quarters the size it is on sheets where it has the cell to
+    // itself (head 79px against 104px standing). This scales it back up.
+    private const double HeldZoom = 1.3;
 
     /// <summary>
     /// Left edge of the drawn cat inside the 192-wide cell. The art is not

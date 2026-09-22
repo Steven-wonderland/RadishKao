@@ -66,12 +66,28 @@ public sealed class PetConfig
     /// </summary>
     public bool StartSwatUsesWinKey { get; set; }
 
+    /// <summary>
+    /// Whether the cat listens to the notification inbox folder, letting other
+    /// programs fire triggers by name. Off means nothing outside the process
+    /// can make the cat react; the right-click menu toggles it and writes the
+    /// choice back here.
+    /// </summary>
+    public bool Notifications { get; set; } = true;
+
+    /// <summary>
+    /// Whether a notification that arrives while the cat is asleep waits for it
+    /// to get up before it is delivered. Off means the bubble appears over a cat
+    /// still lying down, which is faster but reads oddly.
+    /// </summary>
+    public bool NotifyWakeFirst { get; set; } = true;
+
     /// <summary>Hotkey-summoned things the cat will run after.</summary>
     public List<LureConfig> Lures { get; set; } = [];
 
     /// <summary>
-    /// What the cat does when you interact with it. Recognised keys:
-    /// leftClick, doubleClick, middleClick, pickUp, drop.
+    /// What the cat does when you interact with it. Built-in keys:
+    /// leftClick, doubleClick, middleClick, pickUp, drop. Any other key can be
+    /// fired from outside through the notification inbox.
     /// </summary>
     public Dictionary<string, List<TriggerAction>> Triggers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 

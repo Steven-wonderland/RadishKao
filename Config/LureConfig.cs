@@ -49,6 +49,13 @@ public sealed class LureConfig
     /// <summary>Line said on arrival.</summary>
     public string? ArriveSay { get; set; }
 
+    /// <summary>
+    /// Line said once <see cref="ArriveSeconds"/> is up and the cat turns for
+    /// home -- the "finished with it" beat, as opposed to
+    /// <see cref="ArriveSay"/> which fires the moment it gets there.
+    /// </summary>
+    public string? FinishSay { get; set; }
+
     /// <summary>Hint shown across the screen while you are choosing a spot.</summary>
     public string? Hint { get; set; }
 }

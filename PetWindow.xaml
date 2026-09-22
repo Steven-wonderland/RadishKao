@@ -34,13 +34,28 @@
             <Border.Effect>
                 <DropShadowEffect BlurRadius="10" ShadowDepth="1" Opacity="0.22" Color="#000000" />
             </Border.Effect>
-            <TextBlock x:Name="BubbleText"
-                       FontFamily="Microsoft JhengHei UI, Segoe UI"
-                       FontSize="12"
-                       MaxWidth="230"
-                       TextWrapping="Wrap"
-                       TextAlignment="Center"
-                       Foreground="#FF2B2B2B" />
+            <!-- Lifted out of the way when a clip's Zoom pushes the art up into
+                 this strip; see KeepBubbleClearOfArt. -->
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="BubbleLift" />
+            </Border.RenderTransform>
+            <StackPanel Orientation="Horizontal">
+                <Image x:Name="BubbleIcon"
+                       Width="16"
+                       Height="16"
+                       Margin="0,0,6,0"
+                       VerticalAlignment="Center"
+                       Visibility="Collapsed"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+                <TextBlock x:Name="BubbleText"
+                           FontFamily="Microsoft JhengHei UI, Segoe UI, Segoe UI Emoji, Segoe UI Symbol"
+                           FontSize="12"
+                           MaxWidth="230"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           VerticalAlignment="Center"
+                           Foreground="#FF2B2B2B" />
+            </StackPanel>
         </Border>
 
         <Image x:Name="Sprite"
